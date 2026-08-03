@@ -443,6 +443,35 @@ struct SettingsView: View {
                                         .font(.system(size: 10))
                                         .foregroundColor(.green)
                                 }
+
+                                Divider()
+                                    .padding(.vertical, 2)
+
+                                HStack {
+                                    Text("Capture FPS Cap")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.secondary)
+                                    Spacer()
+                                    Text(settings.captureFpsLimit > 0 ? "\(settings.captureFpsLimit) fps" : "Auto")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+
+                                HStack(spacing: 6) {
+                                    ForEach([0, 30, 60, 120], id: \.self) { cap in
+                                        BitrateButton(
+                                            label: cap == 0 ? "Auto" : "\(cap)",
+                                            value: cap,
+                                            currentValue: settings.captureFpsLimit,
+                                            disabled: false
+                                        ) {
+                                            settings.captureFpsLimit = cap
+                                        }
+                                    }
+                                }
+
+                                Text("Caps capture & encoding to lower WindowServer load. The virtual display keeps its own refresh rate. Applies on next Start.")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
                             }
                         }
 
@@ -1148,6 +1177,12 @@ class DisplaySettings: ObservableObject {
     @Published var refreshRate: Int {
         didSet { save("refreshRate", refreshRate) }
     }
+    /// Upper bound on the capture/encode frame rate (0 = Auto: match the refresh
+    /// rate). Lowering this reduces WindowServer + VideoToolbox load independently
+    /// of the virtual display's refresh rate.
+    @Published var captureFpsLimit: Int {
+        didSet { save("captureFpsLimit", captureFpsLimit) }
+    }
     @Published var hiDPI: Bool {
         didSet { save("hiDPI", hiDPI) }
     }
@@ -1217,6 +1252,7 @@ class DisplaySettings: ObservableObject {
     init() {
         self.resolution = defaults.string(forKey: keyPrefix + "resolution") ?? "1920x1200"
         self.refreshRate = defaults.object(forKey: keyPrefix + "refreshRate") as? Int ?? 60  // Default: 60 — balanced for most tablets. 120 may saturate high-res panel pipelines.
+        self.captureFpsLimit = defaults.object(forKey: keyPrefix + "captureFpsLimit") as? Int ?? 0  // 0 = Auto (follow refresh rate)
         self.hiDPI = defaults.bool(forKey: keyPrefix + "hiDPI")
         self.bitrate = defaults.object(forKey: keyPrefix + "bitrate") as? Int ?? 1000  // Default: 1000 Mbps
         self.quality = defaults.string(forKey: keyPrefix + "quality") ?? "ultralow"  // Default: fastest encoding
@@ -1292,6 +1328,16 @@ class DisplaySettings: ObservableObject {
         return gamingBoost ? 120 : refreshRate
     }
 
+    /// Effective capture frame rate handed to ScreenCapture (minimumFrameInterval +
+    /// encoder). Defaults to the effective refresh rate; when captureFpsLimit is set
+    /// (>0) it caps capture/encoding work to reduce WindowServer + VideoToolbox load
+    /// without changing the virtual display's own refresh rate.
+    var effectiveCaptureFps: Int {
+        let base = effectiveRefreshRate
+        guard captureFpsLimit > 0 else { return base }
+        return min(captureFpsLimit, base)
+    }
+
     func toggleServer() {
         onToggleServer?()
     }
@@ -1299,13 +1345,15 @@ class DisplaySettings: ObservableObject {
     func resetToDefaults() {
         let keys = ["resolution", "refreshRate", "hiDPI", "bitrate", "quality",
                     "gamingBoost", "port", "rotation", "flipHorizontal", "flipVertical", "showAllResolutions",
-                    "customWidth", "customHeight", "touchEnabled", "autoStartStreamingOnLaunch", "startupMode"]
+                    "customWidth", "customHeight", "touchEnabled", "autoStartStreamingOnLaunch", "startupMode",
+                    "captureFpsLimit"]
         for key in keys {
             defaults.removeObject(forKey: keyPrefix + key)
         }
 
         resolution = "1920x1200"
         refreshRate = 120  // Default: highest FPS
+        captureFpsLimit = 0  // Auto (follow refresh rate)
         hiDPI = false
         bitrate = 1000  // Default: 1000 Mbps
         quality = "ultralow"  // Default: fastest encoding
@@ -1428,6 +1476,7 @@ struct WirelessSection: View {
     @ObservedObject var settings: DisplaySettings
     let pairedDeviceStore: PairedDeviceStore
     @State private var qrImage: NSImage?
+    @State private var pairingURL: String = ""
     @State private var pairedDevices: [PairedDevice] = []
     @State private var showResetConfirm = false
     /// Used to force the relative-time labels to recompute every tick even when
@@ -1468,6 +1517,28 @@ struct WirelessSection: View {
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
+                    if !pairingURL.isEmpty {
+                        Divider()
+                        Text("No camera? Enter this code manually on the tablet:")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 6) {
+                            Text(pairingURL)
+                                .font(.system(size: 10, design: .monospaced))
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(pairingURL, forType: .string)
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("Copy pairing code to clipboard")
+                        }
+                    }
                     Text(LANAddressResolver.primaryIPv4().map { "Listening: \($0):\(settings.port)" } ?? "WiFi disconnected — no LAN address")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.secondary)
@@ -1565,6 +1636,7 @@ struct WirelessSection: View {
         let host = LANAddressResolver.primaryIPv4() ?? "0.0.0.0"
         let name = Host.current().localizedName ?? "Mac"
         let url = PairingURL.build(host: host, port: settings.port, token: token, name: name)
+        pairingURL = url
         qrImage = QRRenderer.render(url: url, size: 180)
     }
 

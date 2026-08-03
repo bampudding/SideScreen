@@ -546,6 +546,18 @@
                         app:cornerRadius="16dp"
                         app:backgroundTint="#4ade80"
                         android:textColor="#000000" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/wirelessManualButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="8dp"
+                        android:text="Enter Code Manually"
+                        android:textSize="14sp"
+                        app:cornerRadius="16dp"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:textColor="#BBBBBB"
+                        app:strokeColor="#555555" />
                 </LinearLayout>
 
                 <!-- State 3: Connected -->

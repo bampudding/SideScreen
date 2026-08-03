@@ -158,6 +158,7 @@ class MainActivity : AppCompatActivity() {
                         repair = binding.wirelessTokenMismatch,
                         permDenied = binding.wirelessPermDenied,
                         scanButton = binding.wirelessScanButton,
+                        manualButton = binding.wirelessManualButton,
                         rescanButton = binding.wirelessRescanButton,
                         disconnectButton = binding.wirelessDisconnectButton,
                         forgetButton = binding.wirelessForgetButton,

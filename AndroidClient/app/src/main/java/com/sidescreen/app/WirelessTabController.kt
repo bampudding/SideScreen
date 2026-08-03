@@ -34,6 +34,7 @@ class WirelessTabController(
         val repair: View,
         val permDenied: View,
         val scanButton: Button,
+        val manualButton: Button,
         val rescanButton: Button,
         val disconnectButton: Button,
         val forgetButton: Button,
@@ -56,6 +57,7 @@ class WirelessTabController(
 
     fun bind() {
         views.scanButton.setOnClickListener { triggerScan() }
+        views.manualButton.setOnClickListener { showManualEntryDialog() }
         views.rescanButton.setOnClickListener { triggerScan() }
         views.openSettingsButton.setOnClickListener { cameraPerm.openAppSettings() }
         views.forgetButton.setOnClickListener {
@@ -130,6 +132,52 @@ class WirelessTabController(
 
     fun onScanResult(url: String) {
         val parsed = PairingURL.parse(url) ?: return
+        acceptPairing(parsed)
+    }
+
+    /**
+     * Manual pairing for devices without a working camera (or when QR scanning is
+     * impractical). The user pastes the `sidescreen://host:port?t=…&name=…` code
+     * shown on the Mac, which follows the exact same connect path as a QR scan.
+     */
+    private fun showManualEntryDialog() {
+        val input =
+            android.widget.EditText(activity).apply {
+                hint = "Paste the pairing code shown on your Mac"
+                inputType =
+                    android.text.InputType.TYPE_CLASS_TEXT or
+                        android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                setSingleLine(false)
+                minLines = 2
+            }
+        val container =
+            android.widget.FrameLayout(activity).apply {
+                val pad = (20 * activity.resources.displayMetrics.density).toInt()
+                setPadding(pad, 0, pad, 0)
+                addView(input)
+            }
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(activity)
+            .setTitle("Enter pairing code")
+            .setMessage(
+                "Open Side Screen on your Mac → Wireless tab → copy the pairing code " +
+                    "under the QR, then paste it here.",
+            )
+            .setView(container)
+            .setPositiveButton("Pair") { _, _ ->
+                val text = input.text?.toString()?.trim().orEmpty()
+                if (text.isEmpty()) return@setPositiveButton
+                val parsed = PairingURL.parse(text)
+                if (parsed == null) {
+                    android.widget.Toast.makeText(activity, "Invalid pairing code", android.widget.Toast.LENGTH_LONG).show()
+                    return@setPositiveButton
+                }
+                acceptPairing(parsed)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun acceptPairing(parsed: PairingURL.Parsed) {
         val deviceName = (android.os.Build.MODEL ?: "Android").take(64)
         storage.save(PairedHostStorage.Entry(parsed.host, parsed.port, parsed.token, parsed.macName))
         showConnecting("Connecting to ${parsed.macName}", "${parsed.host}:${parsed.port}")

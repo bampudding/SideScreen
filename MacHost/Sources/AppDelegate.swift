@@ -131,6 +131,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func refreshStatusIndicators() {
+        // Refresh the cached accessibility trust so the per-touch hot path in
+        // handleTouch() never blocks on AXIsProcessTrusted().
+        cachedAccessibilityTrusted = AXIsProcessTrusted()
         settings.adbInstalled = StatusDetector.adbInstalled()
         settings.wifiConnected = StatusDetector.wifiReachable()
         settings.listeningAddress = LANAddressResolver.primaryIPv4()
@@ -372,6 +375,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func checkAccessibilityPermission() async {
         let trusted = AXIsProcessTrusted()
         await MainActor.run {
+            self.cachedAccessibilityTrusted = trusted
             settings.hasAccessibilityPermission = trusted
         }
         if trusted {
@@ -386,6 +390,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // This will show the system prompt to grant Accessibility permission
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         let trusted = AXIsProcessTrustedWithOptions(options)
+        cachedAccessibilityTrusted = trusted
         settings.hasAccessibilityPermission = trusted
 
         if !trusted {
@@ -582,7 +587,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self.settings.captureMethod = method
                 }
             }
-            try await screenCapture?.setupForVirtualDisplay(displayID, refreshRate: settings.effectiveRefreshRate)
+            try await screenCapture?.setupForVirtualDisplay(displayID, refreshRate: settings.effectiveCaptureFps)
 
             // Setup server
             streamingServer = StreamingServer(port: settings.port)
@@ -664,7 +669,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 bitrateMbps: settings.effectiveBitrate,
                 quality: settings.effectiveQuality,
                 gamingBoost: settings.gamingBoost,
-                frameRate: settings.effectiveRefreshRate
+                frameRate: settings.effectiveCaptureFps
             )
 
             await MainActor.run {
@@ -707,6 +712,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Gesture Properties
 
     private let eventSource = CGEventSource(stateID: .hidSystemState)
+    /// Cached result of AXIsProcessTrusted(). Refreshed on the 2s status tick and
+    /// after every explicit permission check so the per-touch hot path never blocks
+    /// on this system call (a source of input latency at high touch rates).
+    private var cachedAccessibilityTrusted = AXIsProcessTrusted()
     private var accessibilityWarningShown = false
     private var gestureState: GestureState = .idle
     private var lastTouchTime: UInt64 = 0
@@ -741,7 +750,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func handleTouch(x: Float, y: Float, action: Int, pointerCount: Int = 1, x2: Float = 0, y2: Float = 0) {
         guard settings.touchEnabled else { return }
 
-        if !AXIsProcessTrusted() {
+        if !cachedAccessibilityTrusted {
             if !accessibilityWarningShown {
                 accessibilityWarningShown = true
                 print("⚠️  Accessibility not granted - touch ignored")
